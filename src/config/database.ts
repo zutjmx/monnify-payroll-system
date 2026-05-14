@@ -10,7 +10,7 @@ if (!dbName) {
 
 const config: PoolConfig = {
   host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5433'),
+  port: parseInt(process.env.DB_PORT || '5939'),
   database: dbName,
   user: process.env.DB_USER || 'payroll_user',
   password: process.env.DB_PASSWORD || 'payroll_password',
