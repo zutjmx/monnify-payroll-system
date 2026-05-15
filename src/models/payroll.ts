@@ -90,4 +90,143 @@ export class PayrollModel {
         return payroll;
     }
 
+    static async findById(id: number): Promise<Payroll | null> {
+        const result = await query('SELECT * FROM payrolls WHERE id = $1', [id]);
+        return result.rows[0] || null;
+    }
+
+    static async findAll(): Promise<Payroll[]> {
+        const result = await query(
+            'SELECT * FROM payrolls ORDER BY created_at DESC'
+        );
+        return result.rows;
+    }
+
+    static async updateStatus(
+        id: number,
+        status: PayrollStatus,
+        processedCount?: number,
+        failedCount?: number
+    ): Promise<Payroll> {
+        const updates: string[] = ['status = $2', 'updated_at = NOW()'];
+        const values: any[] = [id, status];
+
+        // Dynamically add processed_count if provided
+        if (processedCount !== undefined) {
+            updates.push(`processed_count = $${values.length + 1}`);
+            values.push(processedCount);
+        }
+
+        // Dynamically add failed_count if provided
+        if (failedCount !== undefined) {
+            updates.push(`failed_count = $${values.length + 1}`);
+            values.push(failedCount);
+        }
+
+        // Set processed_at timestamp for terminal states
+        if (
+            status === PayrollStatus.COMPLETED ||
+            status === PayrollStatus.PARTIALLY_COMPLETED
+        ) {
+            updates.push(`processed_at = NOW()`);
+        }
+
+        const result = await query(
+            `UPDATE payrolls SET ${updates.join(', ')} WHERE id = $1 RETURNING *`,
+            values
+        );
+        return result.rows[0];
+    }
+
+}
+
+export class PayrollItemModel {
+    // Methods will go here
+    static async findByPayrollId(payrollId: number): Promise<PayrollItem[]> {
+        const result = await query(
+            `SELECT
+       pi.id, pi.payroll_id, pi.employee_id, pi.amount, pi.status,
+       pi.transaction_reference, pi.error_message, pi.processed_at,
+       pi.created_at, pi.updated_at,
+       e.name as employee_name, e.employee_id as employee_identifier,
+       e.account_number, e.bank_code, e.bank_name
+     FROM payroll_items pi
+     JOIN employees e ON pi.employee_id = e.id
+     WHERE pi.payroll_id = $1
+     ORDER BY pi.created_at`,
+            [payrollId]
+        );
+        // Normalize numeric fields from PostgreSQL (which returns them as strings)
+        return result.rows.map((row) => ({
+            ...row,
+            employee_id: parseInt(row.employee_id, 10),
+            id: parseInt(row.id, 10),
+            payroll_id: parseInt(row.payroll_id, 10),
+            amount: parseFloat(row.amount),
+        }));
+    }
+
+    static async findById(id: number): Promise<PayrollItem | null> {
+        const result = await query(
+            `SELECT
+       pi.id, pi.payroll_id, pi.employee_id, pi.amount, pi.status,
+       pi.transaction_reference, pi.error_message, pi.processed_at,
+       pi.created_at, pi.updated_at,
+       e.name as employee_name, e.employee_id as employee_identifier,
+       e.account_number, e.bank_code, e.bank_name
+     FROM payroll_items pi
+     JOIN employees e ON pi.employee_id = e.id
+     WHERE pi.id = $1`,
+            [id]
+        );
+
+        if (result.rows.length === 0) return null;
+
+        const row = result.rows[0];
+
+        // Convert numeric fields to proper JavaScript numbers for easier calculations and display
+        return {
+            ...row,
+            employee_id: parseInt(row.employee_id, 10),
+            id: parseInt(row.id, 10),
+            payroll_id: parseInt(row.payroll_id, 10),
+            amount: parseFloat(row.amount),
+        };
+    }
+
+    static async updateStatus(
+        id: number,
+        status: PayrollStatus,
+        transactionReference?: string,
+        errorMessage?: string
+    ): Promise<PayrollItem> {
+        const updates: string[] = ['status = $2', 'updated_at = NOW()'];
+        const values: any[] = [id, status];
+
+        // Add transaction reference if provided (from Monnify API response)
+        if (transactionReference) {
+            updates.push(`transaction_reference = $${values.length + 1}`);
+            values.push(transactionReference);
+        }
+
+        // Add error message if provided (from failed payment)
+        if (errorMessage) {
+            updates.push(`error_message = $${values.length + 1}`);
+            values.push(errorMessage);
+        }
+
+        // Set processed_at timestamp for terminal states
+        if (status === PayrollStatus.COMPLETED || status === PayrollStatus.FAILED) {
+            updates.push(`processed_at = NOW()`);
+        }
+
+        const result = await query(
+            `UPDATE payroll_items SET ${updates.join(
+                ', '
+            )} WHERE id = $1 RETURNING *`,
+            values
+        );
+        return result.rows[0];
+    }
+
 }
